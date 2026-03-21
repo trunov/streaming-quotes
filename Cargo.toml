@@ -1,0 +1,8 @@
+[workspace]
+members = ["quote-client", "quote-server"]
+resolver = "3"
+
+[workspace.dependencies]
+clap = { version = "4.5.60", features = ["derive"] }
+quote-server = { path = "./quote-server" }
+rand = { version = "0.8" }
