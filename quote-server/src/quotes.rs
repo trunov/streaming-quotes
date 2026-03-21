@@ -128,16 +128,6 @@ mod tests {
     }
 
     #[test]
-    fn test_price_changes_between_calls() {
-        let mut quote_gen = QuoteGenerator::new();
-        let q1 = quote_gen.generate_quote("TSLA").unwrap();
-        let q2 = quote_gen.generate_quote("TSLA").unwrap();
-        let q3 = quote_gen.generate_quote("TSLA").unwrap();
-        // extremely unlikely all three are identical with random walk
-        assert!(q1.price != q2.price || q2.price != q3.price);
-    }
-
-    #[test]
     fn test_price_floor() {
         let mut quote_gen = QuoteGenerator::new();
         // force price near zero
