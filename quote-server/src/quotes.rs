@@ -18,7 +18,7 @@ impl StockQuote {
         )
     }
 
-    pub fn deserialize(s: &str) -> Option<Self> {
+    pub fn _deserialize(s: &str) -> Option<Self> {
         let parts: Vec<&str> = s.split('|').collect();
         if parts.len() == 4 {
             Some(StockQuote {

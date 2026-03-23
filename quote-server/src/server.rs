@@ -1,23 +1,27 @@
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
-use std::net::{TcpStream, UdpSocket};
-use std::thread;
-use std::time::Duration;
+use std::net::{SocketAddr, TcpStream};
+use std::sync::{Arc, Mutex};
 
-use crate::quotes::QuoteGenerator;
+#[derive(Debug, Clone)]
+pub struct ClientSubscription {
+    pub udp_addr: SocketAddr,
+    pub tickers: HashSet<String>,
+}
 
-/// Parse "STREAM udp://127.0.0.1:34254 AAPL,TSLA"
-fn parse_stream_command(input: &str) -> Option<(String, Vec<String>)> {
+fn parse_stream_command(input: &str) -> Option<(SocketAddr, HashSet<String>)> {
     let mut parts = input.split_whitespace();
 
-    let cmd = parts.next()?;
-    if cmd != "STREAM" {
+    if parts.next()? != "STREAM" {
         return None;
     }
 
-    let addr = parts.next()?;
-    let addr = addr.strip_prefix("udp://")?;
+    let addr: SocketAddr = parts.next()?.strip_prefix("udp://")?.parse().ok()?;
+    if addr.ip().is_unspecified() {
+        return None;
+    }
 
-    let tickers: Vec<String> = parts
+    let tickers: HashSet<String> = parts
         .next()?
         .split(',')
         .map(|s| s.trim().to_uppercase())
@@ -27,10 +31,13 @@ fn parse_stream_command(input: &str) -> Option<(String, Vec<String>)> {
         return None;
     }
 
-    Some((addr.to_string(), tickers))
+    Some((addr, tickers))
 }
 
-pub fn handle_client(stream: TcpStream) {
+pub fn handle_client(
+    stream: TcpStream,
+    clients: Arc<Mutex<Vec<ClientSubscription>>>,
+) {
     let mut writer = stream.try_clone().expect("failed to clone stream");
     let reader = BufReader::new(stream);
 
@@ -50,29 +57,21 @@ pub fn handle_client(stream: TcpStream) {
                 let _ = writer.write_all(b"OK: streaming started\n");
                 let _ = writer.flush();
                 println!("Client subscribed: {} -> {:?}", udp_addr, tickers);
-                start_udp_stream(udp_addr, tickers);
-                return; // one command per connection for now
+
+                clients.lock().unwrap().push(ClientSubscription {
+                    udp_addr,
+                    tickers,
+                });
+
+                return;
             }
             None => {
-                let _ = writer.write_all(b"ERROR: usage STREAM udp://<host>:<port> TICK1,TICK2\n");
+                let _ = writer.write_all(
+                    b"ERROR: usage STREAM udp://<host>:<port> TICK1,TICK2\n",
+                );
                 let _ = writer.flush();
             }
         }
-    }
-}
-
-fn start_udp_stream(addr: String, tickers: Vec<String>) {
-    let socket = UdpSocket::bind("0.0.0.0:0").expect("failed to bind UDP socket");
-    let mut quote_gen = QuoteGenerator::new();
-
-    loop {
-        for ticker in &tickers {
-            if let Some(quote) = quote_gen.generate_quote(ticker) {
-                let data = quote.serialize();
-                let _ = socket.send_to(data.as_bytes(), &addr);
-            }
-        }
-        thread::sleep(Duration::from_millis(500));
     }
 }
 
@@ -82,22 +81,27 @@ mod tests {
 
     #[test]
     fn test_parse_valid_command() {
-        let (addr, tickers) = parse_stream_command("STREAM udp://127.0.0.1:34254 AAPL,TSLA").unwrap();
-        assert_eq!(addr, "127.0.0.1:34254");
-        assert_eq!(tickers, vec!["AAPL", "TSLA"]);
+        let (addr, tickers) =
+            parse_stream_command("STREAM udp://127.0.0.1:34254 AAPL,TSLA").unwrap();
+        assert_eq!(addr.to_string(), "127.0.0.1:34254");
+        assert!(tickers.contains("AAPL"));
+        assert!(tickers.contains("TSLA"));
     }
 
     #[test]
     fn test_parse_single_ticker() {
-        let (addr, tickers) = parse_stream_command("STREAM udp://127.0.0.1:9000 GOOGL").unwrap();
-        assert_eq!(addr, "127.0.0.1:9000");
-        assert_eq!(tickers, vec!["GOOGL"]);
+        let (addr, tickers) =
+            parse_stream_command("STREAM udp://127.0.0.1:9000 GOOGL").unwrap();
+        assert_eq!(addr.to_string(), "127.0.0.1:9000");
+        assert!(tickers.contains("GOOGL"));
+        assert_eq!(tickers.len(), 1);
     }
 
     #[test]
-    fn test_parse_invalid_command() {
+    fn test_parse_invalid() {
         assert!(parse_stream_command("GET something").is_none());
-        assert!(parse_stream_command("STREAM 127.0.0.1:9000 AAPL").is_none()); // no udp://
+        assert!(parse_stream_command("STREAM 127.0.0.1:9000 AAPL").is_none());
         assert!(parse_stream_command("STREAM").is_none());
+        assert!(parse_stream_command("STREAM udp://0.0.0.0:9000 AAPL").is_none());
     }
 }
