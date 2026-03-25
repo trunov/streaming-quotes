@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
 pub struct ClientSubscription {
@@ -34,14 +33,14 @@ fn parse_stream_command(input: &str) -> Option<(SocketAddr, HashSet<String>)> {
     Some((addr, tickers))
 }
 
-pub fn handle_client(stream: TcpStream, clients: Arc<Mutex<Vec<ClientSubscription>>>) {
+pub fn handle_client(stream: TcpStream) -> Option<ClientSubscription> {
     let mut writer = stream.try_clone().expect("failed to clone stream");
     let reader = BufReader::new(stream);
 
     for line in reader.lines() {
         let line = match line {
             Ok(l) => l,
-            Err(_) => return,
+            Err(_) => return None,
         };
 
         let input = line.trim().to_string();
@@ -53,21 +52,18 @@ pub fn handle_client(stream: TcpStream, clients: Arc<Mutex<Vec<ClientSubscriptio
             Some((udp_addr, tickers)) => {
                 let _ = writer.write_all(b"OK: streaming started\n");
                 let _ = writer.flush();
-                println!("Client subscribed: {} -> {:?}", udp_addr, tickers);
-
-                clients
-                    .lock()
-                    .unwrap()
-                    .push(ClientSubscription { udp_addr, tickers });
-
-                return;
+                return Some(ClientSubscription { udp_addr, tickers });
             }
             None => {
-                let _ = writer.write_all(b"ERROR: usage STREAM udp://<host>:<port> TICK1,TICK2\n");
+                let _ = writer.write_all(
+                    b"ERROR: usage STREAM udp://<host>:<port> TICK1,TICK2\n",
+                );
                 let _ = writer.flush();
             }
         }
     }
+
+    None
 }
 
 #[cfg(test)]

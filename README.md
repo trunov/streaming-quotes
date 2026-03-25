@@ -1,6 +1,6 @@
 # streaming-quotes
 
-Real-time stock quote streaming system over TCP/UDP in Rust. Server generates synthetic market data via random walk and streams filtered quotes to subscribed clients, with ping/pong keep-alive and shared-state concurrency using `Arc<Mutex>`.
+Real-time stock quote streaming system over TCP/UDP in Rust. Server generates synthetic market data via random walk and streams filtered quotes to subscribed clients, with ping/pong keep-alive and crossbeam.
 
 ## Architecture
 
@@ -16,17 +16,6 @@ Client ════════════════════════�
 - **TCP** — control channel. Client sends a single `STREAM` command to subscribe.
 - **UDP** — data channel. Server pushes quotes, client sends periodic PINGs.
 - Server removes clients that stop pinging within 5 seconds.
-
-### Threading model
-
-- **Generator thread** — produces quotes for all tickers every 500ms, iterates over subscriptions and sends UDP directly.
-- **Ping listener thread** — receives UDP `PING` messages and tracks last ping time per client.
-- **Cleanup thread** — periodically removes timed-out clients.
-- **TCP listener** (main thread) — accepts new connections and registers subscriptions.
-
-Threads communicate via shared `Arc<Mutex<Vec<ClientSubscription>>>` and `Arc<Mutex<HashMap<SocketAddr, Instant>>>`. Locks are never held during blocking I/O to avoid stalls, and are never nested to prevent deadlocks.
-
-> **Note:** An alternative design using crossbeam `bounded` channels with per-client sender threads would provide better isolation (one slow client can't block others) and more idiomatic Rust concurrency. The current shared-state approach was chosen for simplicity.
 
 ## Workspace
 
