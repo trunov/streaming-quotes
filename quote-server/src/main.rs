@@ -55,20 +55,30 @@ fn main() -> Result<()> {
         loop {
             thread::sleep(Duration::from_secs(1));
             let now = Instant::now();
-            let mut pings = last_pings_cleanup.lock().unwrap();
-            let mut subs = clients_cleanup.lock().unwrap();
 
-            subs.retain(|sub| {
-                if let Some(last) = pings.get(&sub.udp_addr) {
-                    if now.duration_since(*last) < PING_TIMEOUT {
-                        return true;
-                    }
-                    println!("Client {} timed out, removing", sub.udp_addr);
-                    pings.remove(&sub.udp_addr);
-                    return false;
+            // Collect timed-out addresses under pings lock only
+            let timed_out: Vec<SocketAddr> = {
+                let pings = last_pings_cleanup.lock().unwrap();
+                pings
+                    .iter()
+                    .filter(|(_, last)| now.duration_since(**last) >= PING_TIMEOUT)
+                    .map(|(addr, _)| *addr)
+                    .collect()
+            };
+
+            if !timed_out.is_empty() {
+                // lock clients separately
+                let mut subs = clients_cleanup.lock().unwrap();
+                subs.retain(|sub| !timed_out.contains(&sub.udp_addr));
+                drop(subs);
+
+                // Clean up pings
+                let mut pings = last_pings_cleanup.lock().unwrap();
+                for addr in &timed_out {
+                    println!("Client {} timed out, removing", addr);
+                    pings.remove(addr);
                 }
-                true
-            });
+            }
         }
     });
 
@@ -77,11 +87,12 @@ fn main() -> Result<()> {
     thread::spawn(move || {
         let mut quote_gen = QuoteGenerator::new();
         loop {
+            let subscriptions = clients_gen.lock().unwrap().clone();
+
             let tickers = quote_gen.tickers().to_vec();
             for ticker in &tickers {
                 if let Some(quote) = quote_gen.generate_quote(ticker) {
                     let data = quote.serialize();
-                    let subscriptions = clients_gen.lock().unwrap().clone();
                     for subscription in &subscriptions {
                         if subscription.tickers.contains(&quote.ticker) {
                             let _ = udp_socket.send_to(data.as_bytes(), subscription.udp_addr);
@@ -103,17 +114,14 @@ fn main() -> Result<()> {
                 let clients = Arc::clone(&clients);
                 let last_pings = Arc::clone(&last_pings);
                 thread::spawn(move || {
-                    // Register initial ping time when client subscribes
                     server::handle_client(stream, clients.clone());
 
-                    // After handle_client returns, the client is registered.
-                    // Set initial ping time so they have PING_TIMEOUT to start pinging.
-                    let subs = clients.lock().unwrap();
-                    if let Some(last_sub) = subs.last() {
-                        last_pings
-                            .lock()
-                            .unwrap()
-                            .insert(last_sub.udp_addr, Instant::now());
+                    // Lock clients, grab what we need, release immediately
+                    let last_udp = clients.lock().unwrap().last().map(|x| x.udp_addr);
+
+                    // Lock pings separately — no two locks held at once
+                    if let Some(addr) = last_udp {
+                        last_pings.lock().unwrap().insert(addr, Instant::now());
                     }
                 });
             }
