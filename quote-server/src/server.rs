@@ -34,10 +34,7 @@ fn parse_stream_command(input: &str) -> Option<(SocketAddr, HashSet<String>)> {
     Some((addr, tickers))
 }
 
-pub fn handle_client(
-    stream: TcpStream,
-    clients: Arc<Mutex<Vec<ClientSubscription>>>,
-) {
+pub fn handle_client(stream: TcpStream, clients: Arc<Mutex<Vec<ClientSubscription>>>) {
     let mut writer = stream.try_clone().expect("failed to clone stream");
     let reader = BufReader::new(stream);
 
@@ -58,17 +55,15 @@ pub fn handle_client(
                 let _ = writer.flush();
                 println!("Client subscribed: {} -> {:?}", udp_addr, tickers);
 
-                clients.lock().unwrap().push(ClientSubscription {
-                    udp_addr,
-                    tickers,
-                });
+                clients
+                    .lock()
+                    .unwrap()
+                    .push(ClientSubscription { udp_addr, tickers });
 
                 return;
             }
             None => {
-                let _ = writer.write_all(
-                    b"ERROR: usage STREAM udp://<host>:<port> TICK1,TICK2\n",
-                );
+                let _ = writer.write_all(b"ERROR: usage STREAM udp://<host>:<port> TICK1,TICK2\n");
                 let _ = writer.flush();
             }
         }
@@ -90,8 +85,7 @@ mod tests {
 
     #[test]
     fn test_parse_single_ticker() {
-        let (addr, tickers) =
-            parse_stream_command("STREAM udp://127.0.0.1:9000 GOOGL").unwrap();
+        let (addr, tickers) = parse_stream_command("STREAM udp://127.0.0.1:9000 GOOGL").unwrap();
         assert_eq!(addr.to_string(), "127.0.0.1:9000");
         assert!(tickers.contains("GOOGL"));
         assert_eq!(tickers.len(), 1);

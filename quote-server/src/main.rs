@@ -1,24 +1,26 @@
-mod server;
 mod quotes;
+mod server;
 
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::net::{TcpListener, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use std::collections::HashMap;
-use std::net::SocketAddr;
 
 use quotes::QuoteGenerator;
 use server::ClientSubscription;
 
+use anyhow::{Context, Result};
+
 const PING_TIMEOUT: Duration = Duration::from_secs(5);
 
-fn main() -> std::io::Result<()> {
+fn main() -> Result<()> {
     let clients: Arc<Mutex<Vec<ClientSubscription>>> = Arc::new(Mutex::new(Vec::new()));
-    let last_pings: Arc<Mutex<HashMap<SocketAddr, Instant>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let last_pings: Arc<Mutex<HashMap<SocketAddr, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
 
-    let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
+    let udp_socket = UdpSocket::bind("0.0.0.0:0").context("failed to bind UDP socket")?;
+
     let server_udp_port = udp_socket.local_addr()?;
     println!("UDP sending from {}", server_udp_port);
 
@@ -33,7 +35,10 @@ fn main() -> std::io::Result<()> {
                     let msg = String::from_utf8_lossy(&buf[..size]);
                     if msg.trim() == "PING" {
                         println!("PING from {}", src);
-                        last_pings_listener.lock().unwrap().insert(src, Instant::now());
+                        last_pings_listener
+                            .lock()
+                            .unwrap()
+                            .insert(src, Instant::now());
                     }
                 }
                 Err(e) => {
@@ -89,7 +94,7 @@ fn main() -> std::io::Result<()> {
     });
 
     // TCP listener
-    let listener = TcpListener::bind("127.0.0.1:7878")?;
+    let listener = TcpListener::bind("127.0.0.1:7878").context("failed to bind TCP listener")?;
     println!("Server listening on port 7878");
 
     for stream in listener.incoming() {
@@ -105,7 +110,10 @@ fn main() -> std::io::Result<()> {
                     // Set initial ping time so they have PING_TIMEOUT to start pinging.
                     let subs = clients.lock().unwrap();
                     if let Some(last_sub) = subs.last() {
-                        last_pings.lock().unwrap().insert(last_sub.udp_addr, Instant::now());
+                        last_pings
+                            .lock()
+                            .unwrap()
+                            .insert(last_sub.udp_addr, Instant::now());
                     }
                 });
             }

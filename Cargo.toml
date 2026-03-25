@@ -6,3 +6,4 @@ resolver = "3"
 clap = { version = "4.5.60", features = ["derive"] }
 quote-server = { path = "./quote-server" }
 rand = { version = "0.8" }
+anyhow = { version = "1.0" }

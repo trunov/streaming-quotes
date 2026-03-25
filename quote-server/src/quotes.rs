@@ -1,6 +1,6 @@
+use rand::Rng;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use rand::Rng;
 
 #[derive(Debug, Clone)]
 pub struct StockQuote {
